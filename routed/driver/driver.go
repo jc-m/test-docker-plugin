@@ -12,12 +12,6 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-const (
-	networkType = "routed"
-	ifaceID     = 1
-	VethPrefix  = "vethr" 
-)
-
 type routedEndpoint struct {
 	id              string
 	iface           string
@@ -31,18 +25,29 @@ type routedNetwork struct {
 	endpoints map[string]*routedEndpoint
 }
 
+type routedPool struct {
+	id        		string
+	subnet	  		*net.IPNet
+	allocatedIPs	map[string] bool
+}
+
 type driver struct{
 	version	string
 	network *routedNetwork
+	pool    *routedPool
 	mtu     int
 }
 
-func New(version string) (server.Driver, error) {
-	
-	// TODO Clean interface list
-	
+func New(version string) (server.Driver, error) {	
+	net,_ := netlink.ParseIPNet("100.64.0.0/10")
+	pool := &routedPool{
+		id: "myPool",
+		subnet: net,
+		allocatedIPs: make(map[string] bool),
+	}
 	return &driver{
 		version:    version,
+		pool:    pool,
 	}, nil
 }
 
@@ -58,7 +63,6 @@ func (driver *driver) GetCapabilities() (*netApi.GetCapabilityResponse, error) {
 
 func (driver *driver) CreateNetwork(create *netApi.CreateNetworkRequest) error {
 	log.Infof("Create network request %+v", create)
-	// TODO Seems like there is more to do...
 	
 	driver.network = &routedNetwork{id: create.NetworkID, endpoints: make(map[string]*routedEndpoint)}
 	log.Infof("Create network %s", create.NetworkID)
@@ -69,7 +73,7 @@ func (driver *driver) CreateNetwork(create *netApi.CreateNetworkRequest) error {
 func (driver *driver) DeleteNetwork(delete *netApi.DeleteNetworkRequest) error {
 	log.Infof("Delete network request: %+v", delete)
 	driver.network = nil
-	log.Infof("Destroy network %s", delete.NetworkID)
+	log.Infof("Destroying network %s", delete.NetworkID)
 	return nil
 }
 
@@ -78,45 +82,41 @@ func (driver *driver) CreateEndpoint(create *netApi.CreateEndpointRequest) (*net
 	endID := create.EndpointID
 	reqIface := create.Interface
 	log.Infof("Requested Interface %+v", reqIface)
-	
-//	respIface := &netApi.EndpointInterface{
-//		Address: "172.18.1.2/32",
-//		MacAddress: "EE:EE:EE:EE:EE:EE",
-//	}
+
 	respIface := &netApi.EndpointInterface{}
-	// TODO do something
 	resp := &netApi.CreateEndpointResponse{
 		Interface: respIface,
 	}
 
-	log.Infof("Create endpoint %s %+v", endID, resp)
+	log.Infof("Creating endpoint %s %+v", endID, resp)
 	return resp, nil
 }
 
 func (driver *driver) DeleteEndpoint(delete *netApi.DeleteEndpointRequest) error {
 	log.Infof("Delete endpoint request: %+v", delete)
-	// TODO fill the blank
-	log.Infof("Delete endpoint %s", delete.EndpointID)
+
+	log.Infof("Deleting endpoint %s", delete.EndpointID)
 	return nil
 }
 
 func (driver *driver) EndpointInfo(req *netApi.EndpointInfoRequest) (*netApi.EndpointInfoResponse, error) {
 	log.Infof("Endpoint info request: %+v", req)
+	
 	log.Infof("Endpoint info %s", req.EndpointID)
 	return &netApi.EndpointInfoResponse{Value: map[string]interface{}{}}, nil
 }
 
 func (driver *driver) JoinEndpoint(j *netApi.JoinRequest) (*netApi.JoinResponse, error) {
-	log.Infof("Delete endpoint request: %+v", &j)
+	log.Infof("Join endpoint request: %+v", &j)
 	
-	log.Infof("Join endpoint %s:%s to %s", j.NetworkID, j.EndpointID, j.SandboxKey)
+	log.Infof("Joining endpoint %s:%s to %s", j.NetworkID, j.EndpointID, j.SandboxKey)
 	return nil, nil
 }
 
 func (driver *driver) LeaveEndpoint(leave *netApi.LeaveRequest) error {
 	log.Infof("Leave request: %+v", &leave)
 
-	log.Infof("Leave %s:%s", leave.NetworkID, leave.EndpointID)
+	log.Infof("Leaving %s:%s", leave.NetworkID, leave.EndpointID)
 	return nil
 }
 
@@ -129,38 +129,60 @@ func (driver *driver) GetDefaultAddressSpaces() (*ipamApi.GetAddressSpacesRespon
 	return spaces, nil
 }
 
+/// IPAM driver
+
 func (driver *driver) RequestPool(p *ipamApi.RequestPoolRequest) (*ipamApi.RequestPoolResponse, error) {
 	log.Infof("Pool Request request: %+v", p)
 	
+	cidr := fmt.Sprintf("%s",driver.pool.subnet)
+	id := driver.pool.id
 	pool := &ipamApi.RequestPoolResponse{
-		PoolID: "myPool",
-		Pool: "100.64.0.0/10",
+		PoolID: id,
+		Pool: cidr,
 	}	
+	
 	log.Infof("Pool Request: responded with %+v", pool)
 	return pool, nil
 }
 
 func (driver *driver) RequestAddress(a *ipamApi.RequestAddressRequest) (*ipamApi.RequestAddressResponse, error) {
 	log.Infof("Address Request request: %+v", a)
+	
+	again:
 	// just generate a random address
 	rand.Seed(time.Now().UnixNano())
-	address := &ipamApi.RequestAddressResponse{
-		Address: fmt.Sprintf("100.64.0.%d/32",rand.Intn(254)),
+	ip := driver.pool.subnet.IP.To4()
+	ip[3] = byte(rand.Intn(254))
+	netIP := fmt.Sprintf("%s/32",ip)
+	log.Infof("ip:%s", netIP)
+	
+	_, ok := driver.pool.allocatedIPs[netIP]	
+	
+	if ok {
+		goto again
+	}
+	driver.pool.allocatedIPs[netIP] = true
+	resp := &ipamApi.RequestAddressResponse{
+		Address: fmt.Sprintf("%s",netIP),
 	}	
-	log.Infof("addresse request: responded with %+v", address)
-	return address, nil
+	
+	log.Infof("addresse request: responded with %+v", resp)
+	return resp, nil
 }
 
 func (driver *driver) ReleaseAddress(a *ipamApi.ReleaseAddressRequest) error {
 	log.Infof("Address Release request: %+v", a)
+	ip := fmt.Sprintf("%s/32",a.Address)
+		
+	delete(driver.pool.allocatedIPs, ip)
 
-	log.Infof("addresse release %s from %s", a.Address, a.PoolID)
+	log.Infof("Addresse release %s from %s", a.Address, a.PoolID)
 	return nil
 }
 
 func (driver *driver) ReleasePool(p *ipamApi.ReleasePoolRequest) error {
 	log.Infof("Pool Release request: %+v", p)
 
-	log.Infof("pool release %s ", p.PoolID)
+	log.Infof("Pool release %s ", p.PoolID)
 	return nil
 }
