@@ -13,11 +13,10 @@ import (
 )
 
 type routedEndpoint struct {
-	id              string
 	iface           string
 	macAddress      net.HardwareAddr
 	hostInterface   string
-	ipv4Addresses   []netlink.Addr
+	ipv4Address     *net.IPNet
 }
 
 type routedNetwork struct {
@@ -48,10 +47,14 @@ func New(version string) (server.Driver, error) {
 		allocatedIPs: make(map[string] bool),
 		gateway: gateway,
 	}
+	rnet := &routedNetwork{
+		endpoints: make(map[string] *routedEndpoint),
+	}
 	pool.allocatedIPs[fmt.Sprintf("%s",gateway)] = true
 	return &driver{
 		version:    version,
 		pool:    pool,
+		network: rnet,
 	}, nil
 }
 
@@ -86,8 +89,21 @@ func (driver *driver) CreateEndpoint(create *netApi.CreateEndpointRequest) (*net
 	endID := create.EndpointID
 	reqIface := create.Interface
 	log.Infof("Requested Interface %+v", reqIface)
-
-	respIface := &netApi.EndpointInterface{}
+	addr,_ := netlink.ParseIPNet(reqIface.Address)
+	ep := &routedEndpoint{
+		ipv4Address: addr,
+		
+	}
+	driver.network.endpoints[endID] = ep
+	
+	hw := make(net.HardwareAddr, 6)
+	hw[0] = 0xde
+	hw[1] = 0xad
+	copy(hw[2:], addr.IP.To4())
+	
+	respIface := &netApi.EndpointInterface{
+		MacAddress: hw.String(),
+	}
 	resp := &netApi.CreateEndpointResponse{
 		Interface: respIface,
 	}
@@ -122,22 +138,46 @@ func (driver *driver) JoinEndpoint(j *netApi.JoinRequest) (*netApi.JoinResponse,
 				},
 				PeerName:  tempName,
 	}
+	log.Infof("Adding link %+v", veth)
 	if err := netlink.LinkAdd(veth); err != nil {
+		log.Errorf("Unable to add link %+v:%+v", veth, err)
 		return nil , err
 	}	
+	if err := netlink.LinkSetMTU(veth, 1500); err != nil {
+			log.Errorf("Error setting the MTU %s", err)
+	}
+	log.Infof("Bringing link up %+v", veth)
+	if err := netlink.LinkSetUp(veth); err != nil {
+		log.Errorf("Unable to bring up %+v: %+v", veth, err)
+		return nil, err
+	}
+	ep := driver.network.endpoints[j.EndpointID]
+	ep.iface = hostName
+	
+	iface, _ := netlink.LinkByName(hostName)
+	route := netlink.Route{
+		LinkIndex: iface.Attrs().Index, 
+		Dst: ep.ipv4Address,
+	}
+	
+	log.Infof("Adding route %+v", route)
+	if err := netlink.RouteAdd(&route); err != nil {
+		log.Errorf("Unable to add route %+v: %+v", route, err)
+	}
 	
 	respIface := &netApi.InterfaceName{
-		SrcName: hostName,
+		SrcName: tempName,
 		DstPrefix: "eth",
 	}
-	addedRoute := netApi.StaticRoute{
+	sandboxRoute := netApi.StaticRoute{
 		Destination: fmt.Sprintf("%s",driver.pool.gateway),
-		RouteType: 1,
+		RouteType: 	1, // CONNECTED
+		NextHop:    "",
 	}
 	resp := &netApi.JoinResponse{
 		InterfaceName: respIface,
 		Gateway: fmt.Sprintf("%s",driver.pool.gateway.IP),
-		StaticRoutes: []netApi.StaticRoute{addedRoute},
+		StaticRoutes: []netApi.StaticRoute{sandboxRoute},
 	}
 	log.Infof("Join Request Response %+v", resp)
 	
@@ -146,7 +186,14 @@ func (driver *driver) JoinEndpoint(j *netApi.JoinRequest) (*netApi.JoinResponse,
 
 func (driver *driver) LeaveEndpoint(leave *netApi.LeaveRequest) error {
 	log.Infof("Leave request: %+v", leave)
-
+	ep := driver.network.endpoints[leave.EndpointID]
+	link, err := netlink.LinkByName(ep.iface)
+	if err == nil {
+		log.Debugf("Deleting host interface %s", ep.iface)
+		netlink.LinkDel(link)
+	} else {
+		log.Debugf("interface %s not found", ep.iface)
+	}
 	log.Infof("Leaving %s:%s", leave.NetworkID, leave.EndpointID)
 	return nil
 }
