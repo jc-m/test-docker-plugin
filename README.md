@@ -1,11 +1,13 @@
 #### Experimental (LOCAL) docker plugin ####
 
-This is not a funtional plugin but mostly the implementation of the libnetwork NetworkDriver and IpamDriver
+This is not a funtional plugin but mostly the implementation of the libnetwork NetworkDriver and IpamDriver interfaces simulating the behavior sufficiently to please the docker daemon.
 
 The driver is created and uploaded in a docker container run on the docker-machine along with containers it configures.
 
-to run the container for testing
+to run the container for testing :
+```
 docker run -ti --privileged --net=host --rm -v /run/docker/plugins:/run/docker/plugins jc-m/routed-driver
+```
 
 run in another shell the commands like :
 ```

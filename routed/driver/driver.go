@@ -28,6 +28,7 @@ type routedNetwork struct {
 type routedPool struct {
 	id        		string
 	subnet	  		*net.IPNet
+	gateway			*net.IPNet
 	allocatedIPs	map[string] bool
 }
 
@@ -39,12 +40,15 @@ type driver struct{
 }
 
 func New(version string) (server.Driver, error) {	
-	net,_ := netlink.ParseIPNet("100.64.0.0/10")
+	network,_ := netlink.ParseIPNet("100.64.0.0/10")
+	gateway,_ := netlink.ParseIPNet("100.64.0.1/32")
 	pool := &routedPool{
 		id: "myPool",
-		subnet: net,
+		subnet: network,
 		allocatedIPs: make(map[string] bool),
+		gateway: gateway,
 	}
+	pool.allocatedIPs[fmt.Sprintf("%s",gateway)] = true
 	return &driver{
 		version:    version,
 		pool:    pool,
@@ -107,14 +111,41 @@ func (driver *driver) EndpointInfo(req *netApi.EndpointInfoRequest) (*netApi.End
 }
 
 func (driver *driver) JoinEndpoint(j *netApi.JoinRequest) (*netApi.JoinResponse, error) {
-	log.Infof("Join endpoint request: %+v", &j)
-	
+	log.Infof("Join endpoint request: %+v", j)
 	log.Infof("Joining endpoint %s:%s to %s", j.NetworkID, j.EndpointID, j.SandboxKey)
-	return nil, nil
+	tempName := j.EndpointID[:4]
+	hostName := "vethr"+j.EndpointID[:4]
+	veth := &netlink.Veth{
+				LinkAttrs: netlink.LinkAttrs{
+					Name: hostName,
+					TxQLen: 0,
+				},
+				PeerName:  tempName,
+	}
+	if err := netlink.LinkAdd(veth); err != nil {
+		return nil , err
+	}	
+	
+	respIface := &netApi.InterfaceName{
+		SrcName: hostName,
+		DstPrefix: "eth",
+	}
+	addedRoute := netApi.StaticRoute{
+		Destination: fmt.Sprintf("%s",driver.pool.gateway),
+		RouteType: 1,
+	}
+	resp := &netApi.JoinResponse{
+		InterfaceName: respIface,
+		Gateway: fmt.Sprintf("%s",driver.pool.gateway.IP),
+		StaticRoutes: []netApi.StaticRoute{addedRoute},
+	}
+	log.Infof("Join Request Response %+v", resp)
+	
+	return resp, nil
 }
 
 func (driver *driver) LeaveEndpoint(leave *netApi.LeaveRequest) error {
-	log.Infof("Leave request: %+v", &leave)
+	log.Infof("Leave request: %+v", leave)
 
 	log.Infof("Leaving %s:%s", leave.NetworkID, leave.EndpointID)
 	return nil
@@ -136,9 +167,11 @@ func (driver *driver) RequestPool(p *ipamApi.RequestPoolRequest) (*ipamApi.Reque
 	
 	cidr := fmt.Sprintf("%s",driver.pool.subnet)
 	id := driver.pool.id
+	gateway := fmt.Sprintf("%s",driver.pool.gateway)
 	pool := &ipamApi.RequestPoolResponse{
 		PoolID: id,
 		Pool: cidr,
+		Data: map[string]string{"com.docker.network.gateway": gateway},
 	}	
 	
 	log.Infof("Pool Request: responded with %+v", pool)
