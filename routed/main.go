@@ -2,20 +2,20 @@ package main
 
 import (
 	"flag"
-	"os"
+	log "github.com/Sirupsen/logrus"
+	"github.com/jc-m/test-docker-plugin/routed/driver"
+	"github.com/jc-m/test-docker-plugin/routed/server"
 	"net"
+	"os"
 	"os/signal"
 	"syscall"
-    "github.com/jc-m/test-docker-plugin/routed/server"
-    "github.com/jc-m/test-docker-plugin/routed/driver"
-	log "github.com/Sirupsen/logrus"
 )
 
 func main() {
 
 	var (
-		address	string
-		version	string     
+		address string
+		version string
 	)
 
 	flag.StringVar(&address, "socket", "/run/docker/plugins/routed.sock", "socket on which to listen")
@@ -23,14 +23,12 @@ func main() {
 	flag.Parse()
 
 	log.Info("Test routed network plugin")
-	
 	version = "1"
 	var d server.Driver
 	d, err := driver.New(version)
 	if err != nil {
 		log.Fatalf("unable to create driver: %s", err)
 	}
-	
 	var listener net.Listener
 
 	// remove socket from last invocation
