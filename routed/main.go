@@ -14,18 +14,27 @@ import (
 func main() {
 
 	var (
-		address string
-		version string
+		address  string
+		logLevel string
+		version  string
 	)
 
 	flag.StringVar(&address, "socket", "/run/docker/plugins/routed.sock", "socket on which to listen")
+	flag.StringVar(&logLevel, "log-level", "info", "logging level (debug, info, warning, error)")
 
 	flag.Parse()
 
+	level, err := log.ParseLevel(logLevel)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.SetLevel(level)
+
 	log.Info("Test routed network plugin")
+
 	version = "1"
 	var d server.Driver
-	d, err := driver.New(version)
+	d, err = driver.New(version)
 	if err != nil {
 		log.Fatalf("unable to create driver: %s", err)
 	}
