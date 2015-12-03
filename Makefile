@@ -34,3 +34,7 @@ clean:
 
 build: routed/routed
 	docker build -t $(IMAGETAG) .
+
+clean-docker:
+	-@docker rm $(docker ps -a -q) > /dev/null 2>&1
+	-@docker rmi $(docker images | grep "^<none>" | awk '{print $3}') > /dev/null 2>&1

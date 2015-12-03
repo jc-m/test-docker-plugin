@@ -39,8 +39,8 @@ type driver struct {
 }
 
 func New(version string) (server.Driver, error) {
-	network, _ := netlink.ParseIPNet("100.64.0.0/10")
-	gateway, _ := netlink.ParseIPNet("100.64.0.1/32")
+	network, _ := netlink.ParseIPNet("10.46.0.0/16")
+	gateway, _ := netlink.ParseIPNet("10.46.0.1/32")
 	pool := &routedPool{
 		id:           "myPool",
 		subnet:       network,
@@ -95,25 +95,13 @@ func (driver *driver) CreateEndpoint(create *netApi.CreateEndpointRequest) (*net
 	}
 	driver.network.endpoints[endID] = ep
 
-	hw := make(net.HardwareAddr, 6)
-	hw[0] = 0xde
-	hw[1] = 0xad
-	copy(hw[2:], addr.IP.To4())
-
-	respIface := &netApi.EndpointInterface{
-		MacAddress: hw.String(),
-	}
-	resp := &netApi.CreateEndpointResponse{
-		Interface: respIface,
-	}
-
-	log.Infof("Creating endpoint %s %+v", endID, resp)
-	return resp, nil
+	log.Infof("Creating endpoint %s %+v", endID, nil)
+	return nil, nil
 }
 
 func (driver *driver) DeleteEndpoint(delete *netApi.DeleteEndpointRequest) error {
 	log.Debugf("Delete endpoint request: %+v", delete)
-
+	delete(driver.network.endpoints, delete.EndpointID)
 	log.Infof("Deleting endpoint %s", delete.EndpointID)
 	return nil
 }
@@ -139,7 +127,7 @@ func (driver *driver) JoinEndpoint(j *netApi.JoinRequest) (*netApi.JoinResponse,
 		},
 		PeerName: tempName,
 	}
-	log.Infof("Adding link %+v", veth)
+	log.Debugf("Adding link %+v", veth)
 	if err := netlink.LinkAdd(veth); err != nil {
 		log.Errorf("Unable to add link %+v:%+v", veth, err)
 		return nil, err
@@ -147,7 +135,7 @@ func (driver *driver) JoinEndpoint(j *netApi.JoinRequest) (*netApi.JoinResponse,
 	if err := netlink.LinkSetMTU(veth, 1500); err != nil {
 		log.Errorf("Error setting the MTU %s", err)
 	}
-	log.Infof("Bringing link up %+v", veth)
+	log.Debugf("Bringing link up %+v", veth)
 	if err := netlink.LinkSetUp(veth); err != nil {
 		log.Errorf("Unable to bring up %+v: %+v", veth, err)
 		return nil, err
@@ -162,7 +150,7 @@ func (driver *driver) JoinEndpoint(j *netApi.JoinRequest) (*netApi.JoinResponse,
 		Dst:       ep.ipv4Address,
 	}
 
-	log.Infof("Adding route %+v", route)
+	log.Debugf("Adding route %+v", route)
 	if err := netlink.RouteAdd(&route); err != nil {
 		log.Errorf("Unable to add route %+v: %+v", route, err)
 	}
