@@ -10,7 +10,7 @@
 		{
 			"importpath": "github.com/docker/libnetwork",
 			"repository": "https://github.com/docker/libnetwork",
-			"revision": "29c413a16d37ecb6bb7b27686cb8aaeb78695ef2",
+			"revision": "077b0764e4926509c9e6213ae7b110de48494810",
 			"branch": "master"
 		},
 		{

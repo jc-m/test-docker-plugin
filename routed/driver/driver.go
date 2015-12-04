@@ -99,10 +99,12 @@ func (driver *driver) CreateEndpoint(create *netApi.CreateEndpointRequest) (*net
 	return nil, nil
 }
 
-func (driver *driver) DeleteEndpoint(delete *netApi.DeleteEndpointRequest) error {
-	log.Debugf("Delete endpoint request: %+v", delete)
-	delete(driver.network.endpoints, delete.EndpointID)
-	log.Infof("Deleting endpoint %s", delete.EndpointID)
+func (driver *driver) DeleteEndpoint(d *netApi.DeleteEndpointRequest) error {
+	log.Debugf("Delete endpoint request: %+v", d)
+
+	delete(driver.network.endpoints, d.EndpointID)
+
+	log.Infof("Deleting endpoint %s", d.EndpointID)
 	return nil
 }
 
@@ -165,8 +167,9 @@ func (driver *driver) JoinEndpoint(j *netApi.JoinRequest) (*netApi.JoinResponse,
 		NextHop:     "",
 	}
 	resp := &netApi.JoinResponse{
-		InterfaceName: respIface,
-		StaticRoutes:  []netApi.StaticRoute{sandboxRoute},
+		InterfaceName:         respIface,
+		DisableGatewayService: true,
+		StaticRoutes:          []netApi.StaticRoute{sandboxRoute},
 	}
 	log.Infof("Join Request Response %+v", resp)
 

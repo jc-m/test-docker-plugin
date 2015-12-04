@@ -60,6 +60,8 @@ type endpoint struct {
 	anonymous     bool
 	generic       map[string]interface{}
 	joinLeaveDone chan struct{}
+	prefAddress   net.IP
+	ipamOptions   map[string]string
 	dbIndex       uint64
 	dbExists      bool
 	sync.Mutex
@@ -386,6 +388,9 @@ func (ep *endpoint) sbJoin(sbox Sandbox, options ...EndpointOption) error {
 		}
 	}()
 
+	// Watch for service records
+	network.getController().watchSvcRecord(ep)
+
 	address := ""
 	if ip := ep.getFirstInterfaceAddress(); ip != nil {
 		address = ip.String()
@@ -393,9 +398,6 @@ func (ep *endpoint) sbJoin(sbox Sandbox, options ...EndpointOption) error {
 	if err = sb.updateHostsFile(address, network.getSvcRecords(ep)); err != nil {
 		return err
 	}
-
-	// Watch for service records
-	network.getController().watchSvcRecord(ep)
 
 	if err = sb.updateDNS(network.enableIPv6); err != nil {
 		return err
@@ -584,7 +586,8 @@ func (ep *endpoint) Delete() error {
 	ep.Lock()
 	epid := ep.id
 	name := ep.name
-	if ep.sandboxID != "" {
+	sb, _ := n.getController().SandboxByID(ep.sandboxID)
+	if sb != nil {
 		ep.Unlock()
 		return &ActiveContainerError{name: name, id: epid}
 	}
@@ -681,6 +684,14 @@ func EndpointOptionGeneric(generic map[string]interface{}) EndpointOption {
 		for k, v := range generic {
 			ep.generic[k] = v
 		}
+	}
+}
+
+// CreateOptionIpam function returns an option setter for the ipam configuration for this endpoint
+func CreateOptionIpam(prefAddress net.IP, ipamOptions map[string]string) EndpointOption {
+	return func(ep *endpoint) {
+		ep.prefAddress = prefAddress
+		ep.ipamOptions = ipamOptions
 	}
 }
 
@@ -798,7 +809,7 @@ func (ep *endpoint) assignAddressVersion(ipVer int, ipam ipamapi.Ipam) error {
 		if *address != nil {
 			prefIP = (*address).IP
 		}
-		addr, _, err := ipam.RequestAddress(d.PoolID, prefIP, nil)
+		addr, _, err := ipam.RequestAddress(d.PoolID, prefIP, ep.ipamOptions)
 		if err == nil {
 			ep.Lock()
 			*address = addr

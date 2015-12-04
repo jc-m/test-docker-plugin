@@ -4,28 +4,9 @@ This is not a funtional plugin but mostly the implementation of the libnetwork N
 
 The driver is created and uploaded in a docker container run on the docker-machine along with containers it configures.
 
-Note that this driver needs the following patch to libnetwork/default_gateway.go :
-```
-func (sb *sandbox) needDefaultGW() bool {
-	var needGW bool
+Note that this driver works only with docker built with this commit :
+https://github.com/docker/libnetwork/commit/f942c0e64da67edd584bfbe648fd0494aac4d6e7
 
-	for _, ep := range sb.getConnectedEndpoints() {
-		if ep.endpointInGWNetwork() {
-			continue
-		}
-		if ep.getNetwork().Type() != "bridge" &&
-		ep.getNetwork().Type() != "overlay" &&
-		ep.getNetwork().Type() != "windows" {
-				continue
-		}
-		// TODO v6 needs to be handled.
-		if len(ep.Gateway()) > 0 {
-			return false
-		}
-		needGW = true
-	}
-	return needGW
-}
 ```
 
 to run the container for testing :
