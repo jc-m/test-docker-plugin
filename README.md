@@ -7,7 +7,6 @@ The driver is created and uploaded in a docker container run on the docker-machi
 Note that this driver works only with docker built with this commit :
 https://github.com/docker/libnetwork/commit/f942c0e64da67edd584bfbe648fd0494aac4d6e7
 
-```
 
 to run the container for testing :
 ```
