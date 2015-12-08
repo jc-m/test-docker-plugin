@@ -17,6 +17,7 @@ type routedEndpoint struct {
 	macAddress    net.HardwareAddr
 	hostInterface string
 	ipv4Address   *net.IPNet
+	ipAliases     []*net.IPNet
 }
 
 type routedNetwork struct {
@@ -86,12 +87,20 @@ func (driver *driver) DeleteNetwork(delete *netApi.DeleteNetworkRequest) error {
 
 func (driver *driver) CreateEndpoint(create *netApi.CreateEndpointRequest) (*netApi.CreateEndpointResponse, error) {
 	log.Debugf("Create endpoint request %+v", create)
+	var aliases []*net.IPNet
 	endID := create.EndpointID
 	reqIface := create.Interface
 	log.Debugf("Requested Interface %+v", reqIface)
+	log.Debugf("IP Aliases: %+v", reqIface.IPAliases)
+
+	for _, ipa := range reqIface.IPAliases {
+		ip, _ := netlink.ParseIPNet(ipa)
+		aliases = append(aliases, ip)
+	}
 	addr, _ := netlink.ParseIPNet(reqIface.Address)
 	ep := &routedEndpoint{
 		ipv4Address: addr,
+		ipAliases:   aliases,
 	}
 	driver.network.endpoints[endID] = ep
 
@@ -146,17 +155,11 @@ func (driver *driver) JoinEndpoint(j *netApi.JoinRequest) (*netApi.JoinResponse,
 	ep.iface = hostName
 
 	iface, _ := netlink.LinkByName(hostName)
+	routeAdd(ep.ipv4Address, iface)
 
-	route := netlink.Route{
-		LinkIndex: iface.Attrs().Index,
-		Dst:       ep.ipv4Address,
+	for _, ipa := range ep.ipAliases {
+		routeAdd(ipa, iface)
 	}
-
-	log.Debugf("Adding route %+v", route)
-	if err := netlink.RouteAdd(&route); err != nil {
-		log.Errorf("Unable to add route %+v: %+v", route, err)
-	}
-
 	respIface := &netApi.InterfaceName{
 		SrcName:   tempName,
 		DstPrefix: "eth",
@@ -176,6 +179,17 @@ func (driver *driver) JoinEndpoint(j *netApi.JoinRequest) (*netApi.JoinResponse,
 	return resp, nil
 }
 
+func routeAdd(ip *net.IPNet, iface netlink.Link) error {
+	route := netlink.Route{
+		LinkIndex: iface.Attrs().Index,
+		Dst:       ip,
+	}
+	log.Debugf("Adding route %+v", route)
+	if err := netlink.RouteAdd(&route); err != nil {
+		log.Errorf("Unable to add route %+v: %+v", route, err)
+	}
+	return nil
+}
 func (driver *driver) LeaveEndpoint(leave *netApi.LeaveRequest) error {
 	log.Debugf("Leave request: %+v", leave)
 	ep := driver.network.endpoints[leave.EndpointID]

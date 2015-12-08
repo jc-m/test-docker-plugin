@@ -41,6 +41,9 @@ const (
 
 	// Gateway represents the gateway for the network
 	Gateway = Prefix + ".gateway"
+
+	// IPAliases represents additional IPs to assign to interface
+	IPAliases = Prefix + ".ip_aliases"
 )
 
 var (

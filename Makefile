@@ -3,6 +3,9 @@
 GO15VENDOREXPERIMENT := 1
 export GO15VENDOREXPERIMENT
 
+GOPATH := /Users/jcmartin/Workspaces/golang/:${shell pwd}/routed/.gopath
+export GOPATH
+
 IMAGETAG := jc-m/routed-driver
 
 DEPENDENCIES := github.com/Sirupsen/logrus \
@@ -23,7 +26,7 @@ export CGO_ENABLED
 all: routed/routed
 
 routed/routed: routed/main.go routed/server/*.go routed/driver/*.go
-	go build -o $@ ./$(@D)
+	@GO15VENDOREXPERIMENT=1 go build -o $@ ./$(@D)
 
 vendor_clean: 
 	rm -dRf routed/vendor

@@ -677,7 +677,15 @@ func (n *network) CreateEndpoint(name string, options ...EndpointOption) (Endpoi
 			ep.iface.mac = mac
 		}
 	}
-
+	if opt, ok := ep.generic[netlabel.IPAliases]; ok {
+		if aliases, ok := opt.([]*net.IPNet); ok {
+			for _, alias := range aliases {
+				ep.iface.ipAliases = append(ep.iface.ipAliases, alias)
+				// TODO addresses are not allocated - is it right ?
+			}
+			log.Infof("Enpoint with alias %s ", ep.iface.ipAliases)
+		}
+	}
 	if err = ep.assignAddress(true, !n.postIPv6); err != nil {
 		return nil, err
 	}

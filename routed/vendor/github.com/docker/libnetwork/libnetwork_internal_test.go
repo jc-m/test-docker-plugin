@@ -184,7 +184,10 @@ func TestEndpointMarshalling(t *testing.T) {
 		t.Fatal(err)
 	}
 	nw6.IP = ip
-
+	alias1 := &net.IPNet{
+		IP:   net.IP{8, 8, 8, 8},
+		Mask: net.IPMask{255, 255, 255, 255},
+	}
 	e := &endpoint{
 		name:      "Bau",
 		id:        "efghijklmno",
@@ -201,6 +204,9 @@ func TestEndpointMarshalling(t *testing.T) {
 			dstPrefix: "eth",
 			v4PoolID:  "poolpool",
 			v6PoolID:  "poolv6",
+			ipAliases: []*net.IPNet{
+				alias1,
+			},
 		},
 	}
 
@@ -214,7 +220,6 @@ func TestEndpointMarshalling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	if e.name != ee.name || e.id != ee.id || e.sandboxID != ee.sandboxID || !compareEndpointInterface(e.iface, ee.iface) || e.anonymous != ee.anonymous {
 		t.Fatalf("JSON marsh/unmarsh failed.\nOriginal:\n%#v\nDecoded:\n%#v\nOriginal iface: %#v\nDecodediface:\n%#v", e, ee, e.iface, ee.iface)
 	}
@@ -228,7 +233,8 @@ func compareEndpointInterface(a, b *endpointInterface) bool {
 		return false
 	}
 	return a.srcName == b.srcName && a.dstPrefix == b.dstPrefix && a.v4PoolID == b.v4PoolID && a.v6PoolID == b.v6PoolID &&
-		types.CompareIPNet(a.addr, b.addr) && types.CompareIPNet(a.addrv6, b.addrv6)
+		types.CompareIPNet(a.addr, b.addr) && types.CompareIPNet(a.addrv6, b.addrv6) &&
+		types.CompareIPNet(a.ipAliases[0], b.ipAliases[0])
 }
 
 func compareIpamConfList(listA, listB []*IpamConf) bool {

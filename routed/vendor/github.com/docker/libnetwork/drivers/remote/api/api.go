@@ -70,6 +70,7 @@ type EndpointInterface struct {
 	Address     string
 	AddressIPv6 string
 	MacAddress  string
+	IPAliases   []string
 }
 
 // CreateEndpointResponse is the response to the CreateEndpoint action.
@@ -83,6 +84,7 @@ type Interface struct {
 	Address     *net.IPNet
 	AddressIPv6 *net.IPNet
 	MacAddress  net.HardwareAddr
+	IPAliases   []*net.IPNet
 }
 
 // DeleteEndpointRequest describes the API for deleting an endpoint.
