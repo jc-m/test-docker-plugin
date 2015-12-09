@@ -3,7 +3,7 @@
 GO15VENDOREXPERIMENT := 1
 export GO15VENDOREXPERIMENT
 
-GOPATH := /Users/jcmartin/Workspaces/golang/:${shell pwd}/routed/.gopath
+GOPATH := ${shell pwd}/.gopath:${shell pwd}/vendor
 export GOPATH
 
 IMAGETAG := jc-m/routed-driver
@@ -26,7 +26,7 @@ export CGO_ENABLED
 all: routed/routed
 
 routed/routed: routed/main.go routed/server/*.go routed/driver/*.go
-	@GO15VENDOREXPERIMENT=1 go build -o $@ ./$(@D)
+	go build -o $@ ./$(@D)
 
 vendor_clean: 
 	rm -dRf routed/vendor

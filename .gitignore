@@ -1,2 +1,3 @@
 routed/vendor/github.com/docker/libnetwork/Godeps
 routed/routed
+.gopath
