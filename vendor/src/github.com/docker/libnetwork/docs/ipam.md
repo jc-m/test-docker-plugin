@@ -15,7 +15,7 @@ Communication protocol is the same as the remote network driver.
 
 ## Handshake
 
-During driver registration, libnetwork will query the remote driver about the default local and global address spaces strings.
+During driver registration, libnetwork will query the remote driver about the default local and global address spaces strings, and about the driver capabilities.
 More detailed information can be found in the respective section in this document.
 
 ## Datastore Requirements
@@ -41,7 +41,7 @@ type Ipam interface {
 	RequestPool(addressSpace, pool, subPool string, options map[string]string, v6 bool) (string, *net.IPNet, map[string]string, error)
 	// ReleasePool releases the address pool identified by the passed id
 	ReleasePool(poolID string) error
-	// Request address from the specified pool ID. Input options or preferred IP can be passed.
+	// Request address from the specified pool ID. Input options or required IP can be passed.
 	RequestAddress(string, net.IP, map[string]string) (*net.IPNet, map[string]string, error)
 	// Release the address from the specified pool ID
 	ReleaseAddress(string, net.IP) error
@@ -56,7 +56,7 @@ The following sections explain the each of the above API's semantics, when they 
 A libnetwork user can provide IPAM related configuration when creating a network, via the `NetworkOptionIpam` setter function. 
 
 ```go
-func NetworkOptionIpam(ipamDriver string, addrSpace string, ipV4 []*IpamConf, ipV6 []*IpamConf) NetworkOption
+func NetworkOptionIpam(ipamDriver string, addrSpace string, ipV4 []*IpamConf, ipV6 []*IpamConf, opts map[string]string) NetworkOption
 ```
 
 The caller has to provide the IPAM driver name and may provide the address space and a list of `IpamConf` structures for IPv4 and a list for IPv6. The IPAM driver name is the only mandatory field. If not provided, network creation will fail.
@@ -215,7 +215,7 @@ For this API, the remote driver will receive a POST message to the URL `/IpamDri
 Where:
 
 * `PoolID` is the pool identifier
-* `Address` is the preferred address in regular IP form (A.B.C.D). If empty, the IPAM driver chooses any available address on the pool
+* `Address` is the required address in regular IP form (A.B.C.D). If this address cannot be satisfied, the request fails. If empty, the IPAM driver chooses any available address on the pool
 * `Options` are IPAM driver specific options
 
 
@@ -249,3 +249,27 @@ Where:
 * `PoolID` is the pool identifier
 * `Address` is the IP address to release
 
+
+
+### GetCapabilities
+
+During the driver registration, libnetwork will query the driver about its capabilities. It is not mandatory for the driver to support this URL endpoint. If driver does not support it, registration will succeed with empty capabilities automatically added to the internal driver handle.
+
+During registration, the remote driver will receive a POST message to the URL `/IpamDriver.GetCapabilities` with no payload. The driver's response should have the form:
+
+
+	{
+		"RequiresMACAddress": bool
+	}
+	
+	
+	
+## Capabilities
+
+Capabilities are requirements, features the remote ipam driver can express during registration with libnetwork.
+As of now libnetwork accepts the following capabilities:
+
+### RequiresMACAddress
+
+It is a boolean value which tells libnetwork whether the ipam driver needs to know the interface MAC address in order to properly process the `RequestAddress()` call.
+If true, on `CreateEndpoint()` request, libnetwork will generate a random MAC address for the endpoint (if an explicit MAC address was not already provided by the user) and pass it to `RequestAddress()` when requesting the IP address inside the options map. The key will be the `netlabel.MacAddress` constant: `"com.docker.network.endpoint.macaddress"`.

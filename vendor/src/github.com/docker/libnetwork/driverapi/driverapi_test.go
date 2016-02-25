@@ -15,8 +15,8 @@ func TestIPDataMarshalling(t *testing.T) {
 		Pool:         &net.IPNet{IP: net.IP{10, 10, 10, 8}, Mask: net.IPMask{255, 255, 255, 0}},
 		Gateway:      &net.IPNet{IP: net.IP{10, 10, 10, 254}, Mask: net.IPMask{255, 255, 255, 0}},
 		AuxAddresses: map[string]*net.IPNet{
-			"ip1": &net.IPNet{IP: net.IP{10, 10, 10, 1}, Mask: net.IPMask{255, 255, 255, 0}},
-			"ip2": &net.IPNet{IP: net.IP{10, 10, 10, 2}, Mask: net.IPMask{255, 255, 255, 0}},
+			"ip1": {IP: net.IP{10, 10, 10, 1}, Mask: net.IPMask{255, 255, 255, 0}},
+			"ip2": {IP: net.IP{10, 10, 10, 2}, Mask: net.IPMask{255, 255, 255, 0}},
 		},
 	}
 
@@ -59,8 +59,8 @@ func TestValidateAndIsV6(t *testing.T) {
 		Pool:    &net.IPNet{IP: net.IP{10, 10, 10, 8}, Mask: net.IPMask{255, 255, 255, 0}},
 		Gateway: &net.IPNet{IP: net.IP{10, 10, 10, 254}, Mask: net.IPMask{255, 255, 255, 0}},
 		AuxAddresses: map[string]*net.IPNet{
-			"ip1": &net.IPNet{IP: net.IP{10, 10, 10, 1}, Mask: net.IPMask{255, 255, 255, 0}},
-			"ip2": &net.IPNet{IP: net.IP{10, 10, 10, 2}, Mask: net.IPMask{255, 255, 255, 0}},
+			"ip1": {IP: net.IP{10, 10, 10, 1}, Mask: net.IPMask{255, 255, 255, 0}},
+			"ip2": {IP: net.IP{10, 10, 10, 2}, Mask: net.IPMask{255, 255, 255, 0}},
 		},
 	}
 
@@ -69,7 +69,7 @@ func TestValidateAndIsV6(t *testing.T) {
 		t.Fatalf("incorrect ip version returned")
 	}
 	orig := i.Pool
-	if i.Pool, err = types.ParseCIDR("2003::33/64"); err != nil {
+	if i.Pool, err = types.ParseCIDR("2001:db8::33/64"); err != nil {
 		t.Fatal(err)
 	}
 	if !i.IsV6() {
@@ -83,7 +83,7 @@ func TestValidateAndIsV6(t *testing.T) {
 	}
 
 	// incongruent gw ver
-	if i.Gateway, err = types.ParseCIDR("2001::45/65"); err != nil {
+	if i.Gateway, err = types.ParseCIDR("2001:db8::45/65"); err != nil {
 		t.Fatal(err)
 	}
 	if err = i.Validate(); err == nil {
@@ -92,7 +92,7 @@ func TestValidateAndIsV6(t *testing.T) {
 	i.Gateway = nil
 
 	// incongruent secondary ip ver
-	if i.AuxAddresses["ip2"], err = types.ParseCIDR("2002::44/80"); err != nil {
+	if i.AuxAddresses["ip2"], err = types.ParseCIDR("2001:db8::44/80"); err != nil {
 		t.Fatal(err)
 	}
 	if err = i.Validate(); err == nil {

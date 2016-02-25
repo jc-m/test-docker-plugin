@@ -2,10 +2,12 @@ package ipam
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"net"
-	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -43,16 +45,6 @@ func randomLocalStore() (datastore.DataStore, error) {
 	})
 }
 
-// enable w/ upper case
-func TestMain(m *testing.M) {
-	var err error
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	os.Exit(m.Run())
-}
-
 func getAllocator() (*Allocator, error) {
 	ds, err := randomLocalStore()
 	if err != nil {
@@ -86,7 +78,7 @@ func TestGetAddressVersion(t *testing.T) {
 	if v6 != getAddressVersion(net.ParseIP("ff01::1")) {
 		t.Fatalf("Failed to detect IPv6 version")
 	}
-	if v6 != getAddressVersion(net.ParseIP("2001:56::76:51")) {
+	if v6 != getAddressVersion(net.ParseIP("2001:db8::76:51")) {
 		t.Fatalf("Failed to detect IPv6 version")
 	}
 }
@@ -523,11 +515,11 @@ func TestRemoveSubnet(t *testing.T) {
 		{localAddressSpace, "192.168.0.0/16", false},
 		{localAddressSpace, "172.17.0.0/16", false},
 		{localAddressSpace, "10.0.0.0/8", false},
-		{localAddressSpace, "2002:1:2:3:4:5:ffff::/112", false},
+		{localAddressSpace, "2001:db8:1:2:3:4:ffff::/112", false},
 		{"splane", "172.17.0.0/16", false},
 		{"splane", "10.0.0.0/8", false},
-		{"splane", "2002:1:2:3:4:5:6::/112", true},
-		{"splane", "2002:1:2:3:4:5:ffff::/112", true},
+		{"splane", "2001:db8:1:2:3:4:5::/112", true},
+		{"splane", "2001:db8:1:2:3:4:ffff::/112", true},
 	}
 
 	poolIDs := make([]string, len(input))
@@ -781,7 +773,7 @@ func TestRequestSyntaxCheck(t *testing.T) {
 	ip := net.ParseIP("172.17.0.23")
 	_, _, err = a.RequestAddress(pid, ip, nil)
 	if err == nil {
-		t.Fatalf("Failed to detect wrong request: preferred IP from different subnet")
+		t.Fatalf("Failed to detect wrong request: requested IP from different subnet")
 	}
 
 	ip = net.ParseIP("192.168.0.50")
@@ -1000,4 +992,277 @@ func BenchmarkRequest_16(b *testing.B) {
 func BenchmarkRequest_8(b *testing.B) {
 	a, _ := getAllocator()
 	benchmarkRequest(b, a, "10.0.0.0/8")
+}
+
+func TestAllocateRandomDeallocate(t *testing.T) {
+	testAllocateRandomDeallocate(t, "172.25.0.0/16", "", 384)
+	testAllocateRandomDeallocate(t, "172.25.0.0/16", "172.25.252.0/22", 384)
+}
+
+func testAllocateRandomDeallocate(t *testing.T, pool, subPool string, num int) {
+	ds, err := randomLocalStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a, err := NewAllocator(ds, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pid, _, _, err := a.RequestPool(localAddressSpace, pool, subPool, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Allocate num ip addresses
+	indices := make(map[int]*net.IPNet, num)
+	allocated := make(map[string]bool, num)
+	for i := 0; i < num; i++ {
+		ip, _, err := a.RequestAddress(pid, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ips := ip.String()
+		if _, ok := allocated[ips]; ok {
+			t.Fatalf("Address %s is already allocated", ips)
+		}
+		allocated[ips] = true
+		indices[i] = ip
+	}
+	if len(indices) != len(allocated) || len(indices) != num {
+		t.Fatalf("Unexpected number of allocated addresses: (%d,%d).", len(indices), len(allocated))
+	}
+
+	seed := time.Now().Unix()
+	rand.Seed(seed)
+
+	// Deallocate half of the allocated addresses following a random pattern
+	pattern := rand.Perm(num)
+	for i := 0; i < num/2; i++ {
+		idx := pattern[i]
+		ip := indices[idx]
+		err := a.ReleaseAddress(pid, ip.IP)
+		if err != nil {
+			t.Fatalf("Unexpected failure on deallocation of %s: %v.\nSeed: %d.", ip, err, seed)
+		}
+		delete(indices, idx)
+		delete(allocated, ip.String())
+	}
+
+	// Request a quarter of addresses
+	for i := 0; i < num/2; i++ {
+		ip, _, err := a.RequestAddress(pid, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ips := ip.String()
+		if _, ok := allocated[ips]; ok {
+			t.Fatalf("\nAddress %s is already allocated.\nSeed: %d.", ips, seed)
+		}
+		allocated[ips] = true
+	}
+	if len(allocated) != num {
+		t.Fatalf("Unexpected number of allocated addresses: %d.\nSeed: %d.", len(allocated), seed)
+	}
+}
+
+func TestRetrieveFromStore(t *testing.T) {
+	num := 200
+	ds, err := randomLocalStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := NewAllocator(ds, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _, _, err := a.RequestPool(localAddressSpace, "172.25.0.0/16", "", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < num; i++ {
+		if _, _, err := a.RequestAddress(pid, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Restore
+	a1, err := NewAllocator(ds, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a1.refresh(localAddressSpace)
+	db := a.DumpDatabase()
+	db1 := a1.DumpDatabase()
+	if db != db1 {
+		t.Fatalf("Unexpected db change.\nExpected:%s\nGot:%s", db, db1)
+	}
+	checkDBEquality(a, a1, t)
+	pid, _, _, err = a1.RequestPool(localAddressSpace, "172.25.0.0/16", "172.25.1.0/24", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < num/2; i++ {
+		if _, _, err := a1.RequestAddress(pid, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Restore
+	a2, err := NewAllocator(ds, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a2.refresh(localAddressSpace)
+	checkDBEquality(a1, a2, t)
+	pid, _, _, err = a2.RequestPool(localAddressSpace, "172.25.0.0/16", "172.25.2.0/24", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < num/2; i++ {
+		if _, _, err := a2.RequestAddress(pid, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Restore
+	a3, err := NewAllocator(ds, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a3.refresh(localAddressSpace)
+	checkDBEquality(a2, a3, t)
+	pid, _, _, err = a3.RequestPool(localAddressSpace, "172.26.0.0/16", "", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < num/2; i++ {
+		if _, _, err := a3.RequestAddress(pid, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Restore
+	a4, err := NewAllocator(ds, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a4.refresh(localAddressSpace)
+	checkDBEquality(a3, a4, t)
+}
+
+func checkDBEquality(a1, a2 *Allocator, t *testing.T) {
+	for k, cnf1 := range a1.addrSpaces[localAddressSpace].subnets {
+		cnf2 := a2.addrSpaces[localAddressSpace].subnets[k]
+		if cnf1.String() != cnf2.String() {
+			t.Fatalf("%s\n%s", cnf1, cnf2)
+		}
+		if cnf1.Range == nil {
+			a2.retrieveBitmask(k, cnf1.Pool)
+		}
+	}
+
+	for k, bm1 := range a1.addresses {
+		bm2 := a2.addresses[k]
+		if bm1.String() != bm2.String() {
+			t.Fatalf("%s\n%s", bm1, bm2)
+		}
+	}
+}
+
+const (
+	numInstances = 5
+	first        = 0
+	last         = numInstances - 1
+)
+
+var (
+	allocator *Allocator
+	start     = make(chan struct{})
+	done      = make(chan chan struct{}, numInstances-1)
+	pools     = make([]*net.IPNet, numInstances)
+)
+
+func runParallelTests(t *testing.T, instance int) {
+	var err error
+
+	t.Parallel()
+
+	pTest := flag.Lookup("test.parallel")
+	if pTest == nil {
+		t.Skip("Skipped because test.parallel flag not set;")
+	}
+	numParallel, err := strconv.Atoi(pTest.Value.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if numParallel < numInstances {
+		t.Skip("Skipped because t.parallel was less than ", numInstances)
+	}
+
+	// The first instance creates the allocator, gives the start
+	// and finally checks the pools each instance was assigned
+	if instance == first {
+		allocator, err = getAllocator()
+		if err != nil {
+			t.Fatal(err)
+		}
+		close(start)
+	}
+
+	if instance != first {
+		select {
+		case <-start:
+		}
+
+		instDone := make(chan struct{})
+		done <- instDone
+		defer close(instDone)
+
+		if instance == last {
+			defer close(done)
+		}
+	}
+
+	_, pools[instance], _, err = allocator.RequestPool(localAddressSpace, "", "", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if instance == first {
+		for instDone := range done {
+			select {
+			case <-instDone:
+			}
+		}
+		// Now check each instance got a different pool
+		for i := 0; i < numInstances; i++ {
+			for j := i + 1; j < numInstances; j++ {
+				if types.CompareIPNet(pools[i], pools[j]) {
+					t.Fatalf("Instance %d and %d were given the same predefined pool: %v", i, j, pools)
+				}
+			}
+		}
+	}
+}
+
+func TestParallelPredefinedRequest1(t *testing.T) {
+	runParallelTests(t, 0)
+}
+
+func TestParallelPredefinedRequest2(t *testing.T) {
+	runParallelTests(t, 1)
+}
+
+func TestParallelPredefinedRequest3(t *testing.T) {
+	runParallelTests(t, 2)
+}
+
+func TestParallelPredefinedRequest4(t *testing.T) {
+	runParallelTests(t, 3)
+}
+
+func TestParallelPredefinedRequest5(t *testing.T) {
+	runParallelTests(t, 4)
 }

@@ -37,11 +37,13 @@ type networkCreate struct {
 	Name        string            `json:"name"`
 	NetworkType string            `json:"network_type"`
 	DriverOpts  map[string]string `json:"driver_opts"`
+	NetworkOpts map[string]string `json:"network_opts"`
 }
 
 // endpointCreate represents the body of the "create endpoint" http request message
 type endpointCreate struct {
 	Name         string                `json:"name"`
+	MyAliases    []string              `json:"my_aliases"`
 	ExposedPorts []types.TransportPort `json:"exposed_ports"`
 	PortMapping  []types.PortBinding   `json:"port_mapping"`
 }
@@ -61,15 +63,23 @@ type sandboxCreate struct {
 
 // endpointJoin represents the expected body of the "join endpoint" or "leave endpoint" http request messages
 type endpointJoin struct {
-	SandboxID string `json:"sandbox_id"`
+	SandboxID string   `json:"sandbox_id"`
+	Aliases   []string `json:"aliases"`
 }
 
 // servicePublish represents the body of the "publish service" http request message
 type servicePublish struct {
 	Name         string                `json:"name"`
+	MyAliases    []string              `json:"my_aliases"`
 	Network      string                `json:"network_name"`
 	ExposedPorts []types.TransportPort `json:"exposed_ports"`
 	PortMapping  []types.PortBinding   `json:"port_mapping"`
+}
+
+// serviceDelete represents the body of the "unpublish service" http request message
+type serviceDelete struct {
+	Name  string `json:"name"`
+	Force bool   `json:"force"`
 }
 
 // extraHost represents the extra host object

@@ -42,6 +42,9 @@ const (
 	// Gateway represents the gateway for the network
 	Gateway = Prefix + ".gateway"
 
+	// Internal constant represents that the network is internal which disables default gateway service
+	Internal = Prefix + ".internal"
+
 	// IPAliases represents additional IPs to assign to interface
 	IPAliases = Prefix + ".ip_aliases"
 )
@@ -56,6 +59,9 @@ var (
 	// GlobalKVProviderConfig constant represents the KV provider Config
 	GlobalKVProviderConfig = MakeKVProviderConfig("global")
 
+	// GlobalKVClient constants represents the global kv store client
+	GlobalKVClient = MakeKVClient("global")
+
 	// LocalKVProvider constant represents the KV provider backend
 	LocalKVProvider = MakeKVProvider("local")
 
@@ -64,6 +70,9 @@ var (
 
 	// LocalKVProviderConfig constant represents the KV provider Config
 	LocalKVProviderConfig = MakeKVProviderConfig("local")
+
+	// LocalKVClient constants represents the local kv store client
+	LocalKVClient = MakeKVClient("local")
 )
 
 // MakeKVProvider returns the kvprovider label for the scope
@@ -79,6 +88,11 @@ func MakeKVProviderURL(scope string) string {
 // MakeKVProviderConfig returns the kvprovider config label for the scope
 func MakeKVProviderConfig(scope string) string {
 	return DriverPrivatePrefix + scope + "kv_provider_config"
+}
+
+// MakeKVClient returns the kv client label for the scope
+func MakeKVClient(scope string) string {
+	return DriverPrivatePrefix + scope + "kv_client"
 }
 
 // Key extracts the key portion of the label

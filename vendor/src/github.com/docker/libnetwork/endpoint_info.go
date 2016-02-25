@@ -132,7 +132,7 @@ func (epi *endpointInterface) UnmarshalJSON(b []byte) error {
 	epi.v4PoolID = epMap["v4PoolID"].(string)
 	epi.v6PoolID = epMap["v6PoolID"].(string)
 
-	al, _ := json.Marshal(epMap["ipAliases"]) //?????
+	al, _ := json.Marshal(epMap["ipAliases"]) // TODO check
 	var aliases []string
 	json.Unmarshal(al, &aliases)
 	epi.ipAliases = make([]*net.IPNet, 0)
@@ -216,7 +216,7 @@ func (ep *endpoint) DriverInfo() (map[string]interface{}, error) {
 		return nil, fmt.Errorf("could not find network in store for driver info: %v", err)
 	}
 
-	driver, err := n.driver()
+	driver, err := n.driver(true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get driver info: %v", err)
 	}

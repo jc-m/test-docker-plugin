@@ -21,6 +21,7 @@ type Driver interface {
 	EndpointInfo(req *netApi.EndpointInfoRequest) (*netApi.EndpointInfoResponse, error)
 	JoinEndpoint(j *netApi.JoinRequest) (response *netApi.JoinResponse, error error)
 	LeaveEndpoint(leave *netApi.LeaveRequest) error
+	GetIPAMCapabilities() (*ipamApi.GetCapabilityResponse, error)
 	GetDefaultAddressSpaces() (*ipamApi.GetAddressSpacesResponse, error)
 	RequestPool(p *ipamApi.RequestPoolRequest) (*ipamApi.RequestPoolResponse, error)
 	RequestAddress(a *ipamApi.RequestAddressRequest) (*ipamApi.RequestAddressResponse, error)
@@ -54,6 +55,7 @@ func Listen(socket net.Listener, driver Driver) error {
 	router.Methods("POST").Path("/NetworkDriver.Leave").HandlerFunc(server.leaveEndpoint)
 	
 	// IPAM plugin methods
+	router.Methods("POST").Path("/IpamDriver.GetCapabilities").HandlerFunc(server.getIPAMCapabilities)
 	router.Methods("POST").Path("/IpamDriver.GetDefaultAddressSpaces").HandlerFunc(server.getDefaultAddressSpaces)
 	router.Methods("POST").Path("/IpamDriver.RequestPool").HandlerFunc(server.requestPool)
 	router.Methods("POST").Path("/IpamDriver.RequestAddress").HandlerFunc(server.requestAddress)
@@ -155,6 +157,12 @@ func (server *server) leaveEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	emptyOrErrorResponse(w, server.d.LeaveEndpoint(&l))
+}
+
+func (server *server) getIPAMCapabilities(w http.ResponseWriter, r *http.Request) {
+	log.Info("Processing IPAM GetCapabilities Request")
+	caps, err := server.d.GetIPAMCapabilities()
+	objectOrErrorResponse(w, caps, err)
 }
 
 func (server *server) getDefaultAddressSpaces(w http.ResponseWriter, r *http.Request) {

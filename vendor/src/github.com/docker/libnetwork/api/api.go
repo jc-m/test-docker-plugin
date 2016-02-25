@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/docker/libnetwork"
+	"github.com/docker/libnetwork/netlabel"
+	"github.com/docker/libnetwork/netutils"
 	"github.com/docker/libnetwork/types"
 	"github.com/gorilla/mux"
 )
@@ -274,17 +277,33 @@ func procCreateNetwork(c libnetwork.NetworkController, vars map[string]string, b
 
 	err := json.Unmarshal(body, &create)
 	if err != nil {
-		return "", &responseStatus{Status: "Invalid body: " + err.Error(), StatusCode: http.StatusBadRequest}
+		return nil, &responseStatus{Status: "Invalid body: " + err.Error(), StatusCode: http.StatusBadRequest}
 	}
 	processCreateDefaults(c, &create)
 
 	options := []libnetwork.NetworkOption{}
+	if val, ok := create.NetworkOpts[netlabel.Internal]; ok {
+		internal, err := strconv.ParseBool(val)
+		if err != nil {
+			return nil, &responseStatus{Status: err.Error(), StatusCode: http.StatusBadRequest}
+		}
+		if internal {
+			options = append(options, libnetwork.NetworkOptionInternalNetwork())
+		}
+	}
+	if val, ok := create.NetworkOpts[netlabel.EnableIPv6]; ok {
+		enableIPv6, err := strconv.ParseBool(val)
+		if err != nil {
+			return nil, &responseStatus{Status: err.Error(), StatusCode: http.StatusBadRequest}
+		}
+		options = append(options, libnetwork.NetworkOptionEnableIPv6(enableIPv6))
+	}
 	if len(create.DriverOpts) > 0 {
 		options = append(options, libnetwork.NetworkOptionDriverOpts(create.DriverOpts))
 	}
 	nw, err := c.NewNetwork(create.NetworkType, create.Name, options...)
 	if err != nil {
-		return "", convertNetworkError(err)
+		return nil, convertNetworkError(err)
 	}
 
 	return nw.ID(), &createdResponse
@@ -372,6 +391,10 @@ func procCreateEndpoint(c libnetwork.NetworkController, vars map[string]string, 
 		setFctList = append(setFctList, libnetwork.CreateOptionPortMapping(ec.PortMapping))
 	}
 
+	for _, str := range ec.MyAliases {
+		setFctList = append(setFctList, libnetwork.CreateOptionMyAlias(str))
+	}
+
 	ep, err := n.CreateEndpoint(ec.Name, setFctList...)
 	if err != nil {
 		return "", convertNetworkError(err)
@@ -453,6 +476,7 @@ func procDeleteNetwork(c libnetwork.NetworkController, vars map[string]string, b
 *******************/
 func procJoinEndpoint(c libnetwork.NetworkController, vars map[string]string, body []byte) (interface{}, *responseStatus) {
 	var ej endpointJoin
+	var setFctList []libnetwork.EndpointOption
 	err := json.Unmarshal(body, &ej)
 	if err != nil {
 		return nil, &responseStatus{Status: "Invalid body: " + err.Error(), StatusCode: http.StatusBadRequest}
@@ -471,7 +495,15 @@ func procJoinEndpoint(c libnetwork.NetworkController, vars map[string]string, bo
 		return nil, errRsp
 	}
 
-	err = ep.Join(sb)
+	for _, str := range ej.Aliases {
+		name, alias, err := netutils.ParseAlias(str)
+		if err != nil {
+			return "", convertNetworkError(err)
+		}
+		setFctList = append(setFctList, libnetwork.CreateOptionAlias(name, alias))
+	}
+
+	err = ep.Join(sb, setFctList...)
 	if err != nil {
 		return nil, convertNetworkError(err)
 	}
@@ -509,7 +541,7 @@ func procDeleteEndpoint(c libnetwork.NetworkController, vars map[string]string, 
 		return nil, errRsp
 	}
 
-	err := ep.Delete()
+	err := ep.Delete(false)
 	if err != nil {
 		return nil, convertNetworkError(err)
 	}
@@ -608,6 +640,10 @@ func procPublishService(c libnetwork.NetworkController, vars map[string]string, 
 		setFctList = append(setFctList, libnetwork.CreateOptionPortMapping(sp.PortMapping))
 	}
 
+	for _, str := range sp.MyAliases {
+		setFctList = append(setFctList, libnetwork.CreateOptionMyAlias(str))
+	}
+
 	ep, err := n.CreateEndpoint(sp.Name, setFctList...)
 	if err != nil {
 		return "", endpointToService(convertNetworkError(err))
@@ -617,13 +653,22 @@ func procPublishService(c libnetwork.NetworkController, vars map[string]string, 
 }
 
 func procUnpublishService(c libnetwork.NetworkController, vars map[string]string, body []byte) (interface{}, *responseStatus) {
+	var sd serviceDelete
+
+	if body != nil {
+		err := json.Unmarshal(body, &sd)
+		if err != nil {
+			return "", &responseStatus{Status: "Invalid body: " + err.Error(), StatusCode: http.StatusBadRequest}
+		}
+	}
+
 	epT, epBy := detectEndpointTarget(vars)
 	sv, errRsp := findService(c, epT, epBy)
 	if !errRsp.isOK() {
 		return nil, errRsp
 	}
-	err := sv.Delete()
-	if err != nil {
+
+	if err := sv.Delete(sd.Force); err != nil {
 		return nil, endpointToService(convertNetworkError(err))
 	}
 	return nil, &successResponse
@@ -631,6 +676,7 @@ func procUnpublishService(c libnetwork.NetworkController, vars map[string]string
 
 func procAttachBackend(c libnetwork.NetworkController, vars map[string]string, body []byte) (interface{}, *responseStatus) {
 	var bk endpointJoin
+	var setFctList []libnetwork.EndpointOption
 	err := json.Unmarshal(body, &bk)
 	if err != nil {
 		return nil, &responseStatus{Status: "Invalid body: " + err.Error(), StatusCode: http.StatusBadRequest}
@@ -647,7 +693,15 @@ func procAttachBackend(c libnetwork.NetworkController, vars map[string]string, b
 		return nil, errRsp
 	}
 
-	err = sv.Join(sb)
+	for _, str := range bk.Aliases {
+		name, alias, err := netutils.ParseAlias(str)
+		if err != nil {
+			return "", convertNetworkError(err)
+		}
+		setFctList = append(setFctList, libnetwork.CreateOptionAlias(name, alias))
+	}
+
+	err = sv.Join(sb, setFctList...)
 	if err != nil {
 		return nil, convertNetworkError(err)
 	}

@@ -18,8 +18,17 @@ function get_sbox_id() {
 }
 
 function net_connect() {
-	dnet_cmd $(inst_id2port ${1}) service publish ${2}.${3}
-	dnet_cmd $(inst_id2port ${1}) service attach ${2} ${2}.${3}
+        local al gl
+        if [ -n "$4" ]; then
+            if [ "${4}" != ":" ]; then
+                al="--alias=${4}"
+            fi
+        fi
+        if [ -n "$5" ]; then
+            gl="--alias=${5}"
+        fi
+        dnet_cmd $(inst_id2port ${1}) service publish $gl ${2}.${3}
+        dnet_cmd $(inst_id2port ${1}) service attach $al ${2} ${2}.${3}
 }
 
 function net_disconnect() {
@@ -163,6 +172,7 @@ EOF
 	   --name=${name}  \
 	   --privileged \
 	   -p ${hport}:${cport} \
+	   -e _OVERLAY_HOST_MODE \
 	   -v $(pwd)/:/go/src/github.com/docker/libnetwork \
 	   -v /tmp:/tmp \
 	   -v $(pwd)/${TMPC_ROOT}:/scratch \
@@ -215,6 +225,21 @@ function runc() {
     dnet_exec ${dnet} "umount /var/run/netns/c && rm /var/run/netns/c"
 }
 
+function runc_nofail() {
+    local dnet
+
+    dnet=${1}
+    shift
+    dnet_exec ${dnet} "cp /var/lib/docker/network/files/${1}*/* /scratch/rootfs/etc"
+    dnet_exec ${dnet} "mkdir -p /var/run/netns"
+    dnet_exec ${dnet} "touch /var/run/netns/c && mount -o bind /var/run/docker/netns/${1} /var/run/netns/c"
+    set +e
+    dnet_exec ${dnet} "ip netns exec c unshare -fmuip --mount-proc chroot \"/scratch/rootfs\" /bin/sh -c \"/bin/mount -t proc proc /proc && ${2}\""
+    status="$?"
+    set -e
+    dnet_exec ${dnet} "umount /var/run/netns/c && rm /var/run/netns/c"
+}
+
 function start_etcd() {
     local bridge_ip
     stop_etcd
@@ -264,7 +289,11 @@ function test_overlay() {
     end=3
     # Setup overlay network and connect containers ot it
     if [ -z "${2}" -o "${2}" != "skip_add" ]; then
-	dnet_cmd $(inst_id2port 1) network create -d overlay multihost
+        if [ -z "${2}" -o "${2}" != "internal" ]; then
+	    dnet_cmd $(inst_id2port 1) network create -d overlay multihost
+	else
+	    dnet_cmd $(inst_id2port 1) network create -d overlay --internal multihost
+	fi
     fi
 
     for i in `seq ${start} ${end}`;
@@ -276,8 +305,13 @@ function test_overlay() {
     # Now test connectivity between all the containers using service names
     for i in `seq ${start} ${end}`;
     do
-	runc $(dnet_container_name $i $dnet_suffix) $(get_sbox_id ${i} container_${i}) \
-	     "ping -c 1 www.google.com"
+	if [ -z "${2}" -o "${2}" != "internal" ]; then
+	    runc $(dnet_container_name $i $dnet_suffix) $(get_sbox_id ${i} container_${i}) \
+	        "ping -c 1 www.google.com"
+	else
+	    default_route=`runc $(dnet_container_name $i $dnet_suffix) $(get_sbox_id ${i} container_${i}) "ip route | grep default"`
+	    [ "$default_route" = "" ]
+	fi
 	for j in `seq ${start} ${end}`;
 	do
 	    if [ "$i" -eq "$j" ]; then
@@ -287,6 +321,42 @@ function test_overlay() {
 		 "ping -c 1 container_$j"
 	done
     done
+
+    # Setup bridge network and connect containers ot it
+    if [ -z "${2}" -o "${2}" != "skip_add" ]; then
+        if [ -z "${2}" -o "${2}" != "internal" ]; then
+	    dnet_cmd $(inst_id2port 1) network create -d bridge br1
+	    dnet_cmd $(inst_id2port 1) network create -d bridge br2
+	    net_connect ${start} container_${start} br1
+	    net_connect ${start} container_${start} br2
+
+            # Make sure external connectivity works
+	    runc $(dnet_container_name ${start} $dnet_suffix) $(get_sbox_id ${start} container_${start}) \
+	        "ping -c 1 www.google.com"
+	    net_disconnect ${start} container_${start} br1
+	    net_disconnect ${start} container_${start} br2
+
+            # Make sure external connectivity works
+	    runc $(dnet_container_name ${start} $dnet_suffix) $(get_sbox_id ${start} container_${start}) \
+	        "ping -c 1 www.google.com"
+	    dnet_cmd $(inst_id2port 1) network rm br1
+	    dnet_cmd $(inst_id2port 1) network rm br2
+
+            # Disconnect from overlay network
+            net_disconnect ${start} container_${start} multihost
+
+            # Make sure external connectivity works
+            runc $(dnet_container_name ${start} $dnet_suffix) $(get_sbox_id ${start} container_${start}) \
+                "ping -c 1 www.google.com"
+
+            # Connect to overlay network again
+            net_connect ${start} container_${start} multihost
+
+            # Make sure external connectivity still works
+            runc $(dnet_container_name ${start} $dnet_suffix) $(get_sbox_id ${start} container_${start}) \
+                "ping -c 1 www.google.com"
+	fi
+    fi
 
     # Teardown the container connections and the network
     for i in `seq ${start} ${end}`;
@@ -326,84 +396,6 @@ function check_etchosts() {
     echo ${retval}
 }
 
-function test_overlay_etchosts() {
-    local clist dnet_suffix
-
-    dnet_suffix=$1
-    shift
-
-    echo $(docker ps)
-
-    start=1
-    end=3
-    # Setup overlay network and connect containers ot it
-    dnet_cmd $(inst_id2port 1) network create -d overlay multihost
-
-    for iter in `seq 1 2`;
-    do
-	for i in `seq ${start} ${end}`;
-	do
-	    dnet_cmd $(inst_id2port $i) container create container_${iter}_${i}
-	    net_connect ${i} container_${iter}_${i} multihost
-	done
-
-	# Now test the /etc/hosts content of all the containers
-	for i in `seq ${start} ${end}`;
-	do
-	    clist=""
-	    oldclist=""
-	    for j in `seq ${start} ${end}`;
-	    do
-		if [ "$i" -eq "$j" ]; then
-		    continue
-		fi
-		clist="$clist container_${iter}_$j"
-		oldclist="$oldclist container_1_$j"
-	    done
-	    rv=$(check_etchosts $(dnet_container_name $i $dnet_suffix) \
-				$(get_sbox_id ${i} container_${iter}_${i}) \
-				${clist})
-	    [ "$rv" = "true" ]
-
-	    # check to see the containers don't have stale entries from previous iteration
-	    if [ "$iter" -eq 2 ]; then
-		rv=$(check_etchosts $(dnet_container_name $i $dnet_suffix) \
-				    $(get_sbox_id ${i} container_${iter}_${i}) \
-				    ${oldclist})
-		[ "$rv" = "false" ]
-	    fi
-	done
-
-	# Teardown the container connections and the network
-	clist=""
-	for i in `seq ${start} ${end}`;
-	do
-	    net_disconnect ${i} container_${iter}_${i} multihost
-	    dnet_cmd $(inst_id2port $i) container rm container_${iter}_${i}
-
-	    #check if the /etc/hosts of other containers does not contain this container
-	    for j in `seq ${start} ${end}`;
-	    do
-		if [ "$i" -eq "$j" ]; then
-		    continue
-		fi
-
-		if [[ "${clist}" =~ .*container_${iter}_${j}.* ]]; then
-		    continue
-		fi
-
-		rv=$(check_etchosts $(dnet_container_name $j $dnet_suffix) \
-				    $(get_sbox_id ${j} container_${iter}_${j}) \
-				    container_${iter}_${i})
-		[ "$rv" = "false" ]
-	    done
-	    clist="${clist} container_${iter}_${i}"
-	done
-    done
-
-    dnet_cmd $(inst_id2port 2) network rm multihost
-}
-
 function test_overlay_singlehost() {
     dnet_suffix=$1
     shift
@@ -441,4 +433,84 @@ function test_overlay_singlehost() {
     done
 
     dnet_cmd $(inst_id2port 1) network rm multihost
+}
+
+function test_overlay_hostmode() {
+    dnet_suffix=$1
+    shift
+
+    echo $(docker ps)
+
+    start=1
+    end=2
+    # Setup overlay network and connect containers ot it
+    dnet_cmd $(inst_id2port 1) network create -d overlay multihost1
+    dnet_cmd $(inst_id2port 1) network create -d overlay multihost2
+    dnet_cmd $(inst_id2port 1) network ls
+
+    for i in `seq ${start} ${end}`;
+    do
+	dnet_cmd $(inst_id2port 1) container create mh1_${i}
+	net_connect 1 mh1_${i} multihost1
+    done
+
+    for i in `seq ${start} ${end}`;
+    do
+	dnet_cmd $(inst_id2port 1) container create mh2_${i}
+	net_connect 1 mh2_${i} multihost2
+    done
+
+    # Now test connectivity between all the containers using service names
+    for i in `seq ${start} ${end}`;
+    do
+	for j in `seq ${start} ${end}`;
+	do
+	    if [ "$i" -eq "$j" ]; then
+		continue
+	    fi
+
+	    # Find the IP addresses of the j containers on both networks
+	    hrun runc $(dnet_container_name 1 $dnet_suffix) $(get_sbox_id 1 mh1_${i}) "nslookup mh1_$j"
+	    mh1_j_ip=$(echo ${output} | awk '{print $11}')
+
+	    hrun runc $(dnet_container_name 1 $dnet_suffix) $(get_sbox_id 1 mh2_${i}) "nslookup mh2_$j"
+	    mh2_j_ip=$(echo ${output} | awk '{print $11}')
+
+	    # Ping the j containers in the same network and ensure they are successfull
+	    runc $(dnet_container_name 1 $dnet_suffix) $(get_sbox_id 1 mh1_${i}) \
+		 "ping -c 1 mh1_$j"
+	    runc $(dnet_container_name 1 $dnet_suffix) $(get_sbox_id 1 mh2_${i}) \
+		 "ping -c 1 mh2_$j"
+
+	    # Try pinging j container IPs from the container in the other network and make sure that they are not successfull
+	    runc_nofail $(dnet_container_name 1 $dnet_suffix) $(get_sbox_id 1 mh1_${i}) "ping -c 1 ${mh2_j_ip}"
+	    [ "${status}" -ne 0 ]
+
+	    runc_nofail $(dnet_container_name 1 $dnet_suffix) $(get_sbox_id 1 mh2_${i}) "ping -c 1 ${mh1_j_ip}"
+	    [ "${status}" -ne 0 ]
+
+	    # Try pinging the j container IPS from the host(dnet container in this case) and make syre that they are not successfull
+	    hrun docker exec -it $(dnet_container_name 1 $dnet_suffix) "ping -c 1 ${mh1_j_ip}"
+	    [ "${status}" -ne 0 ]
+
+	    hrun docker exec -it $(dnet_container_name 1 $dnet_suffix) "ping -c 1 ${mh2_j_ip}"
+	    [ "${status}" -ne 0 ]
+	done
+    done
+
+    # Teardown the container connections and the network
+    for i in `seq ${start} ${end}`;
+    do
+	net_disconnect 1 mh1_${i} multihost1
+	dnet_cmd $(inst_id2port 1) container rm mh1_${i}
+    done
+
+    for i in `seq ${start} ${end}`;
+    do
+	net_disconnect 1 mh2_${i} multihost2
+	dnet_cmd $(inst_id2port 1) container rm mh2_${i}
+    done
+
+    dnet_cmd $(inst_id2port 1) network rm multihost1
+    dnet_cmd $(inst_id2port 1) network rm multihost2
 }

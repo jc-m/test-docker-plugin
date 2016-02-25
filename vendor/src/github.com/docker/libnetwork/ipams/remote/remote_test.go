@@ -3,6 +3,7 @@ package remote
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -23,7 +24,7 @@ func decodeToMap(r *http.Request) (res map[string]interface{}, err error) {
 func handle(t *testing.T, mux *http.ServeMux, method string, h func(map[string]interface{}) interface{}) {
 	mux.HandleFunc(fmt.Sprintf("/%s.%s", ipamapi.PluginEndpointType, method), func(w http.ResponseWriter, r *http.Request) {
 		ask, err := decodeToMap(r)
-		if err != nil {
+		if err != nil && err != io.EOF {
 			t.Fatal(err)
 		}
 		answer := h(ask)
@@ -58,6 +59,53 @@ func setupPlugin(t *testing.T, name string, mux *http.ServeMux) func() {
 			t.Fatal(err)
 		}
 		server.Close()
+	}
+}
+
+func TestGetCapabilities(t *testing.T) {
+	var plugin = "test-ipam-driver-capabilities"
+
+	mux := http.NewServeMux()
+	defer setupPlugin(t, plugin, mux)()
+
+	handle(t, mux, "GetCapabilities", func(msg map[string]interface{}) interface{} {
+		return map[string]interface{}{
+			"RequiresMACAddress": true,
+		}
+	})
+
+	p, err := plugins.Get(plugin, ipamapi.PluginEndpointType)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d := newAllocator(plugin, p.Client)
+
+	caps, err := d.(*allocator).getCapabilities()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !caps.RequiresMACAddress {
+		t.Fatalf("Unexpected capability: %v", caps)
+	}
+}
+
+func TestGetCapabilitiesFromLegacyDriver(t *testing.T) {
+	var plugin = "test-ipam-legacy-driver"
+
+	mux := http.NewServeMux()
+	defer setupPlugin(t, plugin, mux)()
+
+	p, err := plugins.Get(plugin, ipamapi.PluginEndpointType)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d := newAllocator(plugin, p.Client)
+
+	if _, err := d.(*allocator).getCapabilities(); err == nil {
+		t.Fatalf("Expected error, but got Success %v", err)
 	}
 }
 

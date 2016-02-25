@@ -3,6 +3,7 @@ package remote
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/docker/docker/pkg/plugins"
 	"github.com/docker/libnetwork/datastore"
+	"github.com/docker/libnetwork/discoverapi"
 	"github.com/docker/libnetwork/driverapi"
 	_ "github.com/docker/libnetwork/testutils"
 	"github.com/docker/libnetwork/types"
@@ -25,7 +27,7 @@ func decodeToMap(r *http.Request) (res map[string]interface{}, err error) {
 func handle(t *testing.T, mux *http.ServeMux, method string, h func(map[string]interface{}) interface{}) {
 	mux.HandleFunc(fmt.Sprintf("/%s.%s", driverapi.NetworkPluginEndpointType, method), func(w http.ResponseWriter, r *http.Request) {
 		ask, err := decodeToMap(r)
-		if err != nil {
+		if err != nil && err != io.EOF {
 			t.Fatal(err)
 		}
 		answer := h(ask)
@@ -431,13 +433,13 @@ func TestRemoteDriver(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data := driverapi.NodeDiscoveryData{
+	data := discoverapi.NodeDiscoveryData{
 		Address: "192.168.1.1",
 	}
-	if err = d.DiscoverNew(driverapi.NodeDiscovery, data); err != nil {
+	if err = d.DiscoverNew(discoverapi.NodeDiscovery, data); err != nil {
 		t.Fatal(err)
 	}
-	if err = d.DiscoverDelete(driverapi.NodeDiscovery, data); err != nil {
+	if err = d.DiscoverDelete(discoverapi.NodeDiscovery, data); err != nil {
 		t.Fatal(err)
 	}
 }

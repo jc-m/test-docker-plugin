@@ -91,6 +91,7 @@ func (ep *endpoint) AddStaticRoute(destination *net.IPNet, routeType int,
 	nextHop net.IP) error {
 	return nil
 }
+
 func (ep *endpoint) DisableGatewayService() {}
 
 func (ep *endpoint) IPAliases() []*net.IPNet {

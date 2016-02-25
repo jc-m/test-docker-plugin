@@ -1,6 +1,9 @@
+// +build linux freebsd
+
 package testutils
 
 import (
+	"os"
 	"runtime"
 	"syscall"
 	"testing"
@@ -36,4 +39,9 @@ func SetupTestOSContext(t *testing.T) func() {
 		}
 		runtime.UnlockOSThread()
 	}
+}
+
+// RunningOnCircleCI returns true if being executed on libnetwork Circle CI setup
+func RunningOnCircleCI() bool {
+	return os.Getenv("CIRCLECI") != ""
 }

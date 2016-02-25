@@ -137,6 +137,113 @@ func TestUpdate(t *testing.T) {
 	}
 }
 
+// This regression test ensures that when a host is given a new IP
+// via the Update function that other hosts which start with the
+// same name as the targeted host are not erroneously updated as well.
+// In the test example, if updating a host called "prefix", unrelated
+// hosts named "prefixAndMore" or "prefix2" or anything else starting
+// with "prefix" should not be changed. For more information see
+// GitHub issue #603.
+func TestUpdateIgnoresPrefixedHostname(t *testing.T) {
+	file, err := ioutil.TempFile("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(file.Name())
+
+	if err := Build(file.Name(), "10.11.12.13", "testhostname", "testdomainname", []Record{
+		{
+			Hosts: "prefix",
+			IP:    "2.2.2.2",
+		},
+		{
+			Hosts: "prefixAndMore",
+			IP:    "3.3.3.3",
+		},
+		{
+			Hosts: "unaffectedHost",
+			IP:    "4.4.4.4",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err := ioutil.ReadFile(file.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if expected := "2.2.2.2\tprefix\n3.3.3.3\tprefixAndMore\n4.4.4.4\tunaffectedHost\n"; !bytes.Contains(content, []byte(expected)) {
+		t.Fatalf("Expected to find '%s' got '%s'", expected, content)
+	}
+
+	if err := Update(file.Name(), "5.5.5.5", "prefix"); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err = ioutil.ReadFile(file.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if expected := "5.5.5.5\tprefix\n3.3.3.3\tprefixAndMore\n4.4.4.4\tunaffectedHost\n"; !bytes.Contains(content, []byte(expected)) {
+		t.Fatalf("Expected to find '%s' got '%s'", expected, content)
+	}
+
+}
+
+// This regression test covers the host prefix issue for the
+// Delete function. In the test example, if deleting a host called
+// "prefix", an unrelated host called "prefixAndMore" should not
+// be deleted. For more information see GitHub issue #603.
+func TestDeleteIgnoresPrefixedHostname(t *testing.T) {
+	file, err := ioutil.TempFile("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(file.Name())
+
+	err = Build(file.Name(), "", "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Add(file.Name(), []Record{
+		{
+			Hosts: "prefix",
+			IP:    "1.1.1.1",
+		},
+		{
+			Hosts: "prefixAndMore",
+			IP:    "2.2.2.2",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Delete(file.Name(), []Record{
+		{
+			Hosts: "prefix",
+			IP:    "1.1.1.1",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err := ioutil.ReadFile(file.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if expected := "2.2.2.2\tprefixAndMore\n"; !bytes.Contains(content, []byte(expected)) {
+		t.Fatalf("Expected to find '%s' got '%s'", expected, content)
+	}
+
+	if expected := "1.1.1.1\tprefix\n"; bytes.Contains(content, []byte(expected)) {
+		t.Fatalf("Did not expect to find '%s' got '%s'", expected, content)
+	}
+}
+
 func TestAddEmpty(t *testing.T) {
 	file, err := ioutil.TempFile("", "")
 	if err != nil {
@@ -167,7 +274,7 @@ func TestAdd(t *testing.T) {
 	}
 
 	if err := Add(file.Name(), []Record{
-		Record{
+		{
 			Hosts: "testhostname",
 			IP:    "2.2.2.2",
 		},
@@ -215,15 +322,15 @@ func TestDelete(t *testing.T) {
 	}
 
 	if err := Add(file.Name(), []Record{
-		Record{
+		{
 			Hosts: "testhostname1",
 			IP:    "1.1.1.1",
 		},
-		Record{
+		{
 			Hosts: "testhostname2",
 			IP:    "2.2.2.2",
 		},
-		Record{
+		{
 			Hosts: "testhostname3",
 			IP:    "3.3.3.3",
 		},
@@ -232,11 +339,11 @@ func TestDelete(t *testing.T) {
 	}
 
 	if err := Delete(file.Name(), []Record{
-		Record{
+		{
 			Hosts: "testhostname1",
 			IP:    "1.1.1.1",
 		},
-		Record{
+		{
 			Hosts: "testhostname3",
 			IP:    "3.3.3.3",
 		},
@@ -271,7 +378,7 @@ func TestConcurrentWrites(t *testing.T) {
 	}
 
 	if err := Add(file.Name(), []Record{
-		Record{
+		{
 			Hosts: "inithostname",
 			IP:    "172.17.0.1",
 		},
@@ -286,7 +393,7 @@ func TestConcurrentWrites(t *testing.T) {
 			defer wg.Done()
 
 			rec := []Record{
-				Record{
+				{
 					IP:    fmt.Sprintf("%d.%d.%d.%d", i, i, i, i),
 					Hosts: fmt.Sprintf("testhostname%d", i),
 				},

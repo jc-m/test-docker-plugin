@@ -215,6 +215,14 @@ func (driver *driver) GetDefaultAddressSpaces() (*ipamApi.GetAddressSpacesRespon
 
 /// IPAM driver
 
+func (driver *driver) GetIPAMCapabilities() (*ipamApi.GetCapabilityResponse, error) {
+	caps := &ipamApi.GetCapabilityResponse{
+		RequiresMACAddress: false,
+	}
+	log.Debugf("Get capabilities: responded with %+v", caps)
+	return caps, nil
+}
+
 func (driver *driver) RequestPool(p *ipamApi.RequestPoolRequest) (*ipamApi.RequestPoolResponse, error) {
 	log.Debugf("Pool Request request: %+v", p)
 
@@ -234,6 +242,17 @@ func (driver *driver) RequestPool(p *ipamApi.RequestPoolRequest) (*ipamApi.Reque
 func (driver *driver) RequestAddress(a *ipamApi.RequestAddressRequest) (*ipamApi.RequestAddressResponse, error) {
 	log.Debugf("Address Request request: %+v", a)
 
+	if len(a.Address) > 0 {
+		addr := fmt.Sprintf("%s/32", a.Address)
+		if _, ok := driver.pool.allocatedIPs[addr]; ok {
+			return nil, fmt.Errorf("%s already allocated", addr)
+		}
+		resp := &ipamApi.RequestAddressResponse{
+			Address: addr,
+		}
+		log.Infof("Addresse request response: %+v", resp)
+		return resp, nil
+	}
 again:
 	// just generate a random address
 	rand.Seed(time.Now().UnixNano())
